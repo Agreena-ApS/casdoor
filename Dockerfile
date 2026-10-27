@@ -9,7 +9,7 @@ RUN yarn install --frozen-lockfile --network-timeout 1000000
 COPY ./web .
 RUN NODE_OPTIONS="--max-old-space-size=4096" yarn run build
 
-FROM --platform=$BUILDPLATFORM golang:1.25.8 AS BACK
+FROM --platform=$BUILDPLATFORM golang:1.25 AS BACK
 WORKDIR /go/src/casdoor
 
 # Copy only go.mod and go.sum first for dependency caching
@@ -22,20 +22,18 @@ COPY . .
 RUN go test -v -run TestGetVersionInfo ./util/system_test.go ./util/system.go ./util/variable.go
 RUN ./build.sh
 
-FROM alpine:latest AS STANDARD
+FROM debian:stable-slim AS STANDARD
 LABEL MAINTAINER="https://casdoor.org/"
 ARG USER=casdoor
 ARG TARGETOS
 ARG TARGETARCH
 ENV BUILDX_ARCH="${TARGETOS:-linux}_${TARGETARCH:-amd64}"
 
-RUN sed -i 's/https/http/' /etc/apk/repositories
-RUN apk add --update sudo
-RUN apk add tzdata
-RUN apk add curl
-RUN apk add ca-certificates && update-ca-certificates
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends sudo tzdata curl ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
 
-RUN adduser -D $USER -u 1000 \
+RUN useradd --create-home --user-group --uid 1000 $USER \
     && echo "$USER ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/$USER \
     && chmod 0440 /etc/sudoers.d/$USER \
     && mkdir logs \
@@ -51,14 +49,15 @@ COPY --from=FRONT --chown=$USER:$USER /web/build ./web/build
 ENTRYPOINT ["/server"]
 
 
-FROM debian:latest AS ALLINONE
+FROM debian:stable-slim AS ALLINONE
 LABEL MAINTAINER="https://casdoor.org/"
 ARG TARGETOS
 ARG TARGETARCH
 ENV BUILDX_ARCH="${TARGETOS:-linux}_${TARGETARCH:-amd64}"
 
-RUN apt update
-RUN apt install -y ca-certificates lsof && update-ca-certificates
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends ca-certificates lsof && \
+    rm -rf /var/lib/apt/lists/*
 
 WORKDIR /
 COPY --from=BACK /go/src/casdoor/server_${BUILDX_ARCH} ./server
